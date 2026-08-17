@@ -1,0 +1,18 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode
+xcuserdata/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+!default.xcworkspace
+
+# macOS
+.DS_Store
+
+# Agent guidance, not part of the published SDK
+CLAUDE.md
+**/CLAUDE.md

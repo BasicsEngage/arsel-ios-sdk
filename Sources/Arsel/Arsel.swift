@@ -1,0 +1,129 @@
+import Foundation
+
+/// The Arsel iOS SDK: events, identity and push notifications.
+///
+/// **Two subsystems, and only one of them needs push.** `track()` and `identify()` work
+/// on a device that has never granted notification permission and has no push token
+/// at all — a user who declines notifications still has a contact and a behavioural
+/// history. Only delivery needs push.
+///
+/// Every entry point is failure-isolated: an unconfigured or misconfigured SDK
+/// logs and no-ops, it never throws at the host. Calls made before `initialize()`
+/// are logged and ignored; getters return nil.
+public enum Arsel {
+    static var core: ArselCore?
+
+    /// Start the SDK. Idempotent — call once, early (e.g. from
+    /// `application(_:didFinishLaunchingWithOptions:)`).
+    ///
+    /// Deliberately does **not** request notification permission — a prompt with no
+    /// user context converts terribly and is unrecoverable once declined. Call
+    /// `requestNotificationPermission()` from a moment that explains itself.
+    public static func initialize(config: ArselConfig) {
+        guard core == nil else { return }
+        if let problem = config.validationError() {
+            // Log-and-refuse, never throw: the SDK must not crash the host over
+            // configuration, but silence would be worse — this is loud on purpose.
+            print("[arsel] initialize() refused: \(problem)")
+            return
+        }
+        let instance = ArselCore(config: config, directory: ArselCore.defaultDirectory())
+        core = instance
+        attachLifecycleObservers()
+        refreshPermissionState()
+        // Anything stranded by a previous run's death goes out now.
+        instance.scheduleDrain()
+    }
+
+    // MARK: Events
+
+    /// Record something the user did. Persisted before send; returns immediately;
+    /// safe from any thread and any actor.
+    ///
+    /// Property values must be JSON-representable; `Date` becomes an ISO-8601
+    /// string, anything else is stringified. Blank names and names starting
+    /// `arsel.` (the SDK's reserved prefix) are ignored.
+    public static func track(_ name: String, properties: [String: Any] = [:]) {
+        guard let core = requireCore("track") else { return }
+        core.track(name, properties: properties)
+    }
+
+    // MARK: Identity
+
+    /// The person using this device, as an id you already have. Everything tracked
+    /// beforehand under the anonymous identity merges onto the contact this
+    /// resolves to. Prefer `externalId` alone: it binds a contact without putting
+    /// an email address into the app, and survives the user changing their address.
+    ///
+    /// `email` and `phoneNumber` are shape-checked (basic email shape; E.164 such
+    /// as `+966501234567`) — an invalid value is rejected with a logged error, not
+    /// stored. Changing `externalId` to a different value drops any stored email
+    /// and phone: they belonged to the previous identity.
+    public static func identify(
+        externalId: String? = nil,
+        email: String? = nil,
+        phoneNumber: String? = nil
+    ) {
+        guard let core = requireCore("identify") else { return }
+        core.identify(externalId: externalId, email: email, phoneNumber: phoneNumber)
+    }
+
+    /// Logout. Rotates the anonymous id and forgets the identifiers so the next
+    /// person on this device does not inherit this one's history.
+    ///
+    /// Deliberately does **not** unsubscribe from push: the backend's opt-out is
+    /// durable and non-resurrectable, so a logout that called it would permanently
+    /// kill push on a shared device. That opt-out exists as `optOut()`, for the
+    /// user who asks to stop receiving notifications.
+    public static func reset() {
+        guard let core = requireCore("reset") else { return }
+        core.reset()
+    }
+
+    /// Durable push opt-out for this device — "stop sending me notifications", not
+    /// logout. The revocation is server-side and non-resurrectable: a later
+    /// registration of the same installation does not undo it.
+    public static func optOut() {
+        guard let core = requireCore("optOut") else { return }
+        core.optOut()
+    }
+
+    // MARK: Push tokens
+
+    /// Hand over the raw APNs device token from
+    /// `application(_:didRegisterForRemoteNotificationsWithDeviceToken:)`.
+    public static func setPushToken(apns deviceToken: Data) {
+        guard let core = requireCore("setPushToken") else { return }
+        let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
+        core.setPushToken(hex, vendor: .apns)
+    }
+
+    // MARK: Introspection
+
+    /// The identity events carry before login. Rotated by `reset()`.
+    /// Nil before `initialize()`.
+    public static var anonymousId: String? {
+        core?.anonymousId
+    }
+
+    /// A snapshot safe to paste into a support ticket — no secrets in it.
+    /// Nil before `initialize()`.
+    public static func diagnostics() -> ArselDiagnostics? {
+        core?.diagnostics()
+    }
+
+    /// Deliver anything queued now, rather than on the next natural drain.
+    public static func flushNow() async {
+        await core?.flushNow()
+    }
+
+    // MARK: -
+
+    private static func requireCore(_ entryPoint: String) -> ArselCore? {
+        guard let core else {
+            print("[arsel] \(entryPoint)() called before initialize() — ignoring")
+            return nil
+        }
+        return core
+    }
+}

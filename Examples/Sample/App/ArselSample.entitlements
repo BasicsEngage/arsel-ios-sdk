@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Needed only for the Notification Service Extension's `delivered` beacons: the SDK mirrors
+  non-secret context into the App Group, and the extension reads the device secret from the
+  shared Keychain group.
+
+  To use these on a device:
+  1. Register the App Group (the ARSEL_APP_GROUP_ID value from Config/*.xcconfig) under
+     YOUR Apple Developer team.
+  2. Replace `com.example.arselsample.shared` below with your own shared Keychain group,
+     and mirror it — with your literal Team ID prefix — into ARSEL_KEYCHAIN_ACCESS_GROUP.
+
+  Simulator builds and CI (CODE_SIGNING_ALLOWED=NO) do not enforce any of this.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(ARSEL_APP_GROUP_ID)</string>
+	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.example.arselsample.shared</string>
+	</array>
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Must mirror the app target's App Group and Keychain access group — the extension reads
+  the context the SDK mirrored into the shared container, and the device secret from the
+  shared Keychain group. See App/ArselPushSample.entitlements for what to fill in.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(ARSEL_APP_GROUP_ID)</string>
+	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.example.arselsample.shared</string>
+	</array>
+</dict>
+</plist>

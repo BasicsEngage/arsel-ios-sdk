@@ -1,0 +1,112 @@
+# XcodeGen manifest — the source of truth for the Xcode project.
+# `xcodegen generate` produces ArselSample.xcodeproj (gitignored, never committed).
+name: ArselSample
+
+options:
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+# Two configurations, the android sample's two flavors: Debug-Staging for day-to-day
+# testing, Release-Prod for a final check against production once provisioned.
+configs:
+  Debug-Staging: debug
+  Release-Prod: release
+
+configFiles:
+  Debug-Staging: Config/Staging.xcconfig
+  Release-Prod: Config/Prod.xcconfig
+
+# The SDK, resolved from the checkout this sample lives in. A local package is still a
+# real SPM dependency — the app links the published products (`Arsel`,
+# `ArselNotificationExtension`) and sees nothing the SDK does not export.
+#
+# To test against a released tag exactly as an integrator would, swap this for:
+#   arsel-ios-sdk:
+#     url: https://github.com/BasicsEngage/arsel-ios-sdk.git
+#     from: 1.0.0
+packages:
+  arsel-ios-sdk:
+    path: ../..
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Fill in your Apple Developer team for device builds. Simulator builds don't need it.
+    DEVELOPMENT_TEAM: ""
+
+targets:
+  ArselSample:
+    type: application
+    platform: iOS
+    sources:
+      - App/Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(ARSEL_BUNDLE_ID)
+        CODE_SIGN_ENTITLEMENTS: App/ArselSample.entitlements
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: $(ARSEL_APP_NAME)
+        UILaunchScreen: {}
+        ITSAppUsesNonExemptEncryption: false
+        # Build-time config, read back by HarnessConfig at runtime.
+        ArselBaseUrl: $(ARSEL_BASE_URL)
+        ArselClientKey: $(ARSEL_CLIENT_KEY)
+        ArselAppGroupId: $(ARSEL_APP_GROUP_ID)
+        ArselKeychainAccessGroup: $(ARSEL_KEYCHAIN_ACCESS_GROUP)
+    dependencies:
+      - package: arsel-ios-sdk
+        product: Arsel
+      - target: NotificationService
+
+  NotificationService:
+    type: app-extension
+    platform: iOS
+    sources:
+      - NotificationService/Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(ARSEL_BUNDLE_ID).NotificationService
+        CODE_SIGN_ENTITLEMENTS: NotificationService/NotificationService.entitlements
+    info:
+      path: NotificationService/Info.plist
+      properties:
+        CFBundleDisplayName: ArselSample NotificationService
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+        ArselAppGroupId: $(ARSEL_APP_GROUP_ID)
+    dependencies:
+      - package: arsel-ios-sdk
+        product: ArselNotificationExtension
+
+schemes:
+  ArselSample-Staging:
+    build:
+      targets:
+        ArselSample: all
+    run:
+      config: Debug-Staging
+    profile:
+      config: Debug-Staging
+    analyze:
+      config: Debug-Staging
+    archive:
+      config: Debug-Staging
+  ArselSample-Prod:
+    build:
+      targets:
+        ArselSample: all
+    run:
+      config: Release-Prod
+    profile:
+      config: Release-Prod
+    analyze:
+      config: Release-Prod
+    archive:
+      config: Release-Prod

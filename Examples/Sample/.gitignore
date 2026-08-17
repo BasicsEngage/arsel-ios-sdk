@@ -1,0 +1,13 @@
+# XcodeGen output — regenerate with `xcodegen generate`, never commit
+ArselPushSample.xcodeproj/
+App/Info.plist
+NotificationService/Info.plist
+
+# Xcode / SwiftPM
+DerivedData/
+.build/
+.swiftpm/
+xcuserdata/
+*.xcresult
+Package.resolved
+.DS_Store

@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # Guards the "Core/ is Foundation-only" invariant: if a UIKit or
+  # UserNotifications import leaks into Core/, this is what fails. Not redundant
+  # with the iOS job — it is the only place the absence of those frameworks is
+  # proven.
+  linux-tests:
+    runs-on: ubuntu-24.04
+    container: swift:5.10
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test
+        run: swift test
+
+  # The real iOS signal: `xcodebuild test` on a simulator, so Platform/ is both
+  # compiled and executed. Two toolchains — the floor implied by swift-tools 5.10
+  # / iOS 15, and whatever is current.
+  ios:
+    name: iOS tests (Xcode ${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            xcode: '15.4'
+            label: '15.4'
+          # Empty `xcode` takes the image default rather than naming a version
+          # that may not exist on it yet.
+          - runner: macos-latest
+            xcode: ''
+            label: latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode ${{ matrix.xcode }}
+        if: matrix.xcode != ''
+        run: sudo xcode-select -s /Applications/Xcode_${{ matrix.xcode }}.app
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Test
+        run: make test
+
+  # The integrator-facing surface: Examples/Sample resolves the SDK as a local
+  # package, so this compiles what a customer actually links against.
+  #
+  # Only on the latest Xcode: Homebrew's current XcodeGen writes a project format
+  # that Xcode 15.4 cannot open ("Unable to read project"), so this cannot join
+  # the matrix above without pinning XcodeGen too.
+  sample:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build the sample
+        run: make sample

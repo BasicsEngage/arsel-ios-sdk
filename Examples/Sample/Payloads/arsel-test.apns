@@ -1,0 +1,13 @@
+{
+  "Simulator Target Bundle": "com.example.arselsample.staging",
+  "aps": {
+    "alert": {
+      "title": "Hello from Arsel",
+      "body": "Simulated payload — rendering rail only"
+    },
+    "mutable-content": 1
+  },
+  "arsel_v": "1",
+  "arsel_mid": "test-0001",
+  "arsel_deep_link": "https://example.com/welcome"
+}

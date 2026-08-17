@@ -1,0 +1,25 @@
+// Debug-Staging — day-to-day testing against the test environment Arsel gives you.
+//
+// xcconfig treats "//" as a comment START even in the middle of a value, so URLs are
+// written with an empty-substitution trick:  https:/$()/example.com
+
+// The staging base URL Arsel gives you, e.g.  https:/$()/staging-api.example.com
+ARSEL_BASE_URL = REPLACE_WITH_STAGING_BASE_URL
+
+// The org's publishable pub_… key (shown when push is enabled for the org). Publishable by
+// design — it ships inside every integrator's binary — but always a DEDICATED TEST ORG's
+// key, never a real customer's.
+ARSEL_CLIENT_KEY = REPLACE_WITH_STAGING_PK_KEY
+
+// The android sample's applicationIdSuffix scheme: staging carries its own bundle id, so
+// staging and prod install side by side, each with its own SDK state (Keychain + files).
+ARSEL_BUNDLE_ID = com.example.arselsample.staging
+ARSEL_APP_NAME = Arsel Sample (staging)
+
+// Optional — needed only for the Notification Service Extension's `delivered` beacons.
+// Register the App Group under YOUR team (and match App/*.entitlements). The Keychain
+// access group is your Team-ID-prefixed shared group, e.g.
+//   ARSEL_KEYCHAIN_ACCESS_GROUP = AB12CD34EF.com.example.arselsample.shared
+// Leave empty to run without the NSE beacon path.
+ARSEL_APP_GROUP_ID = group.com.example.arselsample.staging
+ARSEL_KEYCHAIN_ACCESS_GROUP =

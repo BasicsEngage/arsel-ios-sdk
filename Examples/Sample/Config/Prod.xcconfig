@@ -1,0 +1,13 @@
+// Release-Prod — a final check against production, once provisioned. Deliberately unusable
+// until you fill in the key: registering test devices into a real org is the one mistake
+// this file can make, so treat changing it as a reviewed change.
+
+ARSEL_BASE_URL = https:/$()/api.arsel.sa
+ARSEL_CLIENT_KEY = REPLACE_WITH_PROD_PK_KEY
+
+ARSEL_BUNDLE_ID = com.example.arselsample
+ARSEL_APP_NAME = Arsel Sample (prod)
+
+// See Staging.xcconfig for what these are. Use a SEPARATE App Group from staging.
+ARSEL_APP_GROUP_ID = group.com.example.arselsample
+ARSEL_KEYCHAIN_ACCESS_GROUP =
