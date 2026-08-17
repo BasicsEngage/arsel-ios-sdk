@@ -87,7 +87,8 @@ Arsel.optOut()
 ```
 
 `reset()` and `optOut()` are deliberately different calls. Calling `optOut()` on logout would leave
-the device permanently unreachable: a user who signs back in would never receive push again.
+the device unreachable for the life of the install: a user who signs back in would not receive push
+again. See [Identity](docs/identity.md).
 
 `clientKey` is the org's **publishable** `pub_…` key — the same design as Klaviyo's site ID or
 CleverTap's Account ID. It authenticates both APIs and grants nothing a secret API key does.

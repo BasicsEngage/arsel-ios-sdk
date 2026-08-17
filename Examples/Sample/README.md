@@ -122,4 +122,4 @@ tag, swap that for the `url:`/`from:` form shown in `project.yml`.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](../../LICENSE).
