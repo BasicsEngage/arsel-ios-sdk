@@ -10,6 +10,12 @@ permissions:
 jobs:
   release:
     runs-on: macos-14
+    # Holds the job for a human approval before the release is cut. This one is
+    # recoverable where the others are not — SPM resolves git tags, so there is no
+    # registry and a mistaken release can be deleted — but all three SDKs ship the
+    # same version on the same day, and a release process that differs per platform
+    # is its own hazard.
+    environment: release
     steps:
       - uses: actions/checkout@v4
 
