@@ -1,0 +1,218 @@
+import Foundation
+
+/// One renderable in-app message, exactly as the catalogue describes it.
+struct InAppMessage {
+    let campaignId: String
+    let messageId: String
+    let variantKey: String
+    let expiresAtMs: Int64?
+    let triggerType: String
+    let triggerEventName: String?
+    let triggerProperties: [String: String]
+    let maxPerSession: Int
+    let maxLifetime: Int
+    let minSecondsBetween: Int
+    let delaySeconds: Int
+    let layout: String
+    let headline: String
+    let body: String
+    let imageUrl: String?
+    let backgroundColor: String?
+    let textColor: String?
+    let showCloseButton: Bool
+    let buttons: [InAppButton]
+}
+
+struct InAppButton {
+    let buttonId: String
+    let label: String
+    let action: String
+    let value: String?
+}
+
+/// The catalogue as fetched.
+///
+/// Server order is preserved and never re-sorted: the backend already emits
+/// priority-descending, then earliest expiry, then campaign id — exactly the documented
+/// precedence — and a client-side sort could only ever diverge from it invisibly.
+struct InAppCatalogue {
+    let version: String
+    let ttlSeconds: Int
+    let fetchedAtMs: Int64
+    let messages: [InAppMessage]
+}
+
+/// Per-message lifetime counters. Device-scoped, and deliberately survives a logout:
+/// it records what this handset has already shown a person.
+struct InAppMessageState: Codable {
+    var shown: Int
+    var lastShownAtMs: Int64
+    var lastSeenAtMs: Int64
+    var expiredReported: Bool
+}
+
+enum InAppTrigger {
+    static let appOpen = "APP_OPEN"
+    static let screenView = "SCREEN_VIEW"
+    static let customEvent = "CUSTOM_EVENT"
+}
+
+enum InAppLayout {
+    static let modal = "MODAL"
+    static let bannerTop = "BANNER_TOP"
+    static let bannerBottom = "BANNER_BOTTOM"
+    static let fullscreen = "FULLSCREEN"
+    static let imageOnly = "IMAGE_ONLY"
+
+    /// iOS draws all five; only web excludes fullscreen.
+    static let all: Set<String> = [modal, bannerTop, bannerBottom, fullscreen, imageOnly]
+}
+
+enum InAppAction {
+    static let deepLink = "DEEP_LINK"
+    static let url = "URL"
+    static let dismiss = "DISMISS"
+    static let customEvent = "CUSTOM_EVENT"
+}
+
+enum InAppBeacon {
+    static let impression = "impression"
+    static let clicked = "clicked"
+    static let dismissed = "dismissed"
+    static let expired = "expired"
+}
+
+/// Parses the catalogue.
+///
+/// Every optional field comes out of a Postgres `jsonb` column and is three-state — absent,
+/// explicitly null, or present. `JSONSerialization` gives back `NSNull` for the middle case, which
+/// a plain `as? String` silently turns into nil along with "absent"; that is fine here because both
+/// mean the same thing to us, but a field whose ABSENCE has a different default from its NULL must
+/// be read explicitly. A parser that dropped messages on either would fail silently, and silence is
+/// the one failure this channel cannot detect from any surface.
+enum InAppParser {
+    static let defaultVariant = "default"
+    static let defaultTtlSeconds = 900
+
+    static func catalogue(from data: Data?, nowMs: Int64) -> InAppCatalogue? {
+        guard let data = data,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        // The envelope is never key-validated: the backend's global success interceptor spreads
+        // `message` and `timestamp` alongside the contract fields.
+        guard let version = string(root["bundleVersion"]) else { return nil }
+
+        let raw = root["messages"] as? [[String: Any]] ?? []
+        let parsed = raw.compactMap { message(from: $0) }
+
+        let ttl = root["ttlSeconds"] as? Int ?? defaultTtlSeconds
+        return InAppCatalogue(
+            version: version,
+            ttlSeconds: ttl > 0 ? ttl : defaultTtlSeconds,
+            fetchedAtMs: nowMs,
+            messages: parsed)
+    }
+
+    static func message(from json: [String: Any]) -> InAppMessage? {
+        guard let campaignId = string(json["campaignId"]),
+              let messageId = string(json["messageId"]),
+              let layout = string(json["layout"]),
+              InAppLayout.all.contains(layout),
+              let content = json["content"] as? [String: Any],
+              let headline = string(content["headline"]) else {
+            return nil
+        }
+
+        let trigger = json["trigger"] as? [String: Any] ?? [:]
+        let rules = json["displayRules"] as? [String: Any] ?? [:]
+
+        return InAppMessage(
+            campaignId: campaignId,
+            messageId: messageId,
+            variantKey: string(json["variantKey"]) ?? defaultVariant,
+            expiresAtMs: millis(from: string(json["expiresAt"])),
+            triggerType: string(trigger["type"]) ?? InAppTrigger.appOpen,
+            triggerEventName: string(trigger["eventName"]),
+            triggerProperties: properties(from: trigger["properties"]),
+            maxPerSession: rules["maxPerSession"] as? Int ?? 1,
+            maxLifetime: rules["maxLifetime"] as? Int ?? 3,
+            minSecondsBetween: rules["minSecondsBetween"] as? Int ?? 86_400,
+            delaySeconds: rules["delaySeconds"] as? Int ?? 0,
+            layout: layout,
+            headline: headline,
+            body: string(content["body"]) ?? "",
+            imageUrl: string(content["imageUrl"]),
+            backgroundColor: string(content["backgroundColor"]),
+            textColor: string(content["textColor"]),
+            // Absent means "not suppressed"; only an explicit false hides it.
+            showCloseButton: content["showCloseButton"] as? Bool ?? true,
+            buttons: buttons(from: json["buttons"]))
+    }
+
+    private static func buttons(from raw: Any?) -> [InAppButton] {
+        guard let array = raw as? [[String: Any]] else { return [] }
+        return array.compactMap { item in
+            guard let buttonId = string(item["buttonId"]),
+                  let label = string(item["label"]),
+                  let action = string(item["action"]) else {
+                return nil
+            }
+            return InAppButton(
+                buttonId: buttonId,
+                label: label,
+                action: action,
+                value: string(item["value"]))
+        }
+    }
+
+    /// Predicates are compared as strings on both sides. The backend types them
+    /// `Record<string, string>` but validates only with `@IsObject()`, so a number or a boolean can
+    /// legitimately arrive and must not be dropped.
+    private static func properties(from raw: Any?) -> [String: String] {
+        guard let object = raw as? [String: Any] else { return [:] }
+        var out: [String: String] = [:]
+        for (key, value) in object where !(value is NSNull) {
+            if let text = value as? String {
+                out[key] = text
+            } else {
+                out[key] = String(describing: value)
+            }
+        }
+        return out
+    }
+
+    /// Non-empty string, treating both `NSNull` and absence as nil.
+    private static func string(_ raw: Any?) -> String? {
+        guard let text = raw as? String, !text.isEmpty else { return nil }
+        return text
+    }
+
+    /// Unparseable means open-ended rather than expired: refusing to show a live message is worse
+    /// than carrying one whose expiry could not be read.
+    static func millis(from iso: String?) -> Int64? {
+        guard let iso = iso, !iso.isEmpty else { return nil }
+        for formatter in isoFormatters {
+            if let date = formatter.date(from: iso) {
+                return Int64(date.timeIntervalSince1970 * 1000)
+            }
+        }
+        return nil
+    }
+
+    static func isoTimestamp(_ millis: Int64) -> String {
+        isoFormatters[0].string(from: Date(timeIntervalSince1970: TimeInterval(millis) / 1000))
+    }
+
+    /// With and without milliseconds — both are valid ISO-8601 and both appear in practice.
+    /// `en_US_POSIX` is mandatory: any other locale can render or parse a different calendar.
+    private static let isoFormatters: [DateFormatter] = {
+        ["yyyy-MM-dd'T'HH:mm:ss.SSSZZZZZ", "yyyy-MM-dd'T'HH:mm:ssZZZZZ"].map { pattern in
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(identifier: "UTC")
+            formatter.dateFormat = pattern
+            return formatter
+        }
+    }()
+}

@@ -23,9 +23,16 @@ struct TransportResponse {
 /// No status line at all — DNS failure, offline, TLS error.
 let CODE_NO_RESPONSE = -1
 
+/// The catalogue fetch branches on this before reading a body; a 304 carries none.
+let HTTP_NOT_MODIFIED = 304
+
 protocol Transport {
     /// Blocking; only ever called on the drain queue, never the main thread.
     func post(url: URL, body: Data, headers: [String: String], authenticated: Bool) -> TransportResponse
+
+    /// Conditional GET, for the in-app catalogue. Separate from `post` because that one
+    /// always writes a body, and this is the only request whose 304 is a success.
+    func get(url: URL, headers: [String: String], authenticated: Bool) -> TransportResponse
 }
 
 /// Status → retry policy. Pure, and the same table the Android and web SDKs use:
@@ -33,6 +40,10 @@ protocol Transport {
 /// that gives up forever.
 func classify(code: Int, authenticated: Bool) -> TransportResult {
     if (200...299).contains(code) { return .success }
+    // The cached in-app catalogue is still current. Without this the conditional GET falls
+    // through to `.permanent` below and the cache is discarded on every successful
+    // revalidation — the opposite of what the request asked for.
+    if code == HTTP_NOT_MODIFIED { return .success }
     if code == 408 || code == 429 || (500...599).contains(code) { return .retryable }
     // Behind the backend's deliberately opaque 404, an authed 401/403/404 all mean
     // one thing: this secret is dead.
@@ -74,6 +85,19 @@ final class URLSessionTransport: Transport {
         self.log = log
     }
 
+    func get(url: URL, headers: [String: String], authenticated: Bool) -> TransportResponse {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        // The server sends ETag + Cache-Control: no-cache, so URLSession would otherwise
+        // revalidate on its own and hand back a synthesized 200 — our If-None-Match would
+        // never reach the server and 304 would never happen.
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(Wire.sdkHeaderValue, forHTTPHeaderField: Wire.sdkHeader)
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+        return perform(request, url: url, method: "GET", authenticated: authenticated)
+    }
+
     func post(url: URL, body: Data, headers: [String: String], authenticated: Bool) -> TransportResponse {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -83,8 +107,17 @@ final class URLSessionTransport: Transport {
         request.setValue(Wire.sdkHeaderValue, forHTTPHeaderField: Wire.sdkHeader)
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
 
-        // Blocking bridge: the drain loop is sequential by design (stop at the first
-        // retryable failure), so an async pipeline here would buy nothing.
+        return perform(request, url: url, method: "POST", authenticated: authenticated)
+    }
+
+    /// Blocking bridge: the drain loop is sequential by design (stop at the first
+    /// retryable failure), so an async pipeline here would buy nothing.
+    private func perform(
+        _ request: URLRequest,
+        url: URL,
+        method: String,
+        authenticated: Bool
+    ) -> TransportResponse {
         let semaphore = DispatchSemaphore(value: 0)
         var outcome: TransportResponse = TransportResponse(
             result: .retryable, code: CODE_NO_RESPONSE, body: nil, retryAfterMs: nil)
@@ -104,11 +137,11 @@ final class URLSessionTransport: Transport {
         task.resume()
         if semaphore.wait(timeout: .now() + timeout + 5) == .timedOut {
             task.cancel()
-            log.w("POST \(url.path) hung past its timeout — treating as a network failure")
+            log.w("\(method) \(url.path) hung past its timeout — treating as a network failure")
             return TransportResponse(result: .retryable, code: CODE_NO_RESPONSE, body: nil, retryAfterMs: nil)
         }
         if outcome.result != .success {
-            log.w("POST \(url.path) -> \(outcome.code) (\(outcome.result))")
+            log.w("\(method) \(url.path) -> \(outcome.code) (\(outcome.result))")
         }
         return outcome
     }

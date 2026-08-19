@@ -19,6 +19,7 @@ final class ArselCore {
     let events: EventController
     let sessions: SessionTracker
     let push: PushController
+    let inApp: InAppController
 
     private var drainScheduled = false
     private var consecutiveFailures = 0
@@ -45,11 +46,14 @@ final class ArselCore {
         self.secrets = secrets ?? FileSecretStore(directory: directory)
         #endif
         self.requestQueue = RequestQueue(directory: directory, log: log)
+        // One instance, shared: a second URLSession would mean a second connection pool for the
+        // same host, and the tests inject a single mock.
+        let http = transport ?? URLSessionTransport(timeout: config.networkTimeout, log: log)
         self.drainer = Drainer(
             queue: requestQueue,
             store: store,
             secrets: self.secrets,
-            transport: transport ?? URLSessionTransport(timeout: config.networkTimeout, log: log),
+            transport: http,
             log: log,
             clock: clock)
 
@@ -66,6 +70,31 @@ final class ArselCore {
             store: store, enqueue: enqueueRef, log: log, clock: clock, deviceSnapshot: deviceSnapshot)
         self.sessions = SessionTracker(store: store, events: events, clock: clock)
 
+        let storeRef = store
+        let clientKey = config.clientKey
+        let baseUrl = config.baseUrl
+        self.inApp = InAppController(
+            store: InAppStore(directory: directory, log: log),
+            transport: http,
+            secrets: self.secrets,
+            enqueue: enqueueRef,
+            context: {
+                guard let installationId = storeRef.current.installationId else { return nil }
+                return (clientKey: clientKey, baseUrl: baseUrl, installationId: installationId)
+            },
+            log: log,
+            clock: clock)
+        // Wired here rather than at a later call site: the cold-start session fires from
+        // `Arsel.initialize` before any host code runs, so an observer attached afterwards would
+        // miss the first `arsel.session_start` of every launch — which is the app-open trigger.
+        self.events.onEvent = { [weak self] name, properties, timestampMs in
+            self?.inApp.onEvent(name: name, properties: properties, timestampMs: timestampMs)
+        }
+        self.inApp.scheduleRefresh = { [weak self] in
+            guard let self = self else { return }
+            self.serial.async { self.inApp.refresh() }
+        }
+
         trigger.fire = { [weak self] in self?.scheduleDrain() }
         drainer.onNeedsRegistration = { [weak self] in
             // Called from inside a drain, already on the serial queue.
@@ -78,6 +107,12 @@ final class ArselCore {
 
     func track(_ name: String, properties: [String: Any] = [:]) {
         serial.async { self.events.track(name, properties: properties) }
+    }
+
+    /// For SDK-owned event names only. `track` refuses the `arsel.` prefix by design, and a screen
+    /// view is one of ours: it carries trigger meaning the host cannot spell by convention.
+    func trackReserved(_ name: String, properties: [String: Any] = [:]) {
+        serial.async { self.events.trackReserved(name, properties: properties) }
     }
 
     func identify(externalId: String? = nil, email: String? = nil, phoneNumber: String? = nil) {
@@ -161,9 +196,50 @@ final class ArselCore {
 
     func onForeground() {
         serial.async {
+            // Order matters: the session opens first, and its `arsel.session_start` is what drives
+            // the in-app app-open trigger through the event observer. The refresh below only
+            // covers a foreground that did NOT open a new session — inside the 30-minute gap the
+            // catalogue can still have gone stale.
             self.sessions.onForeground()
+            self.inApp.refresh()
             self.scheduleDrainLocked()
         }
+    }
+
+    /// Attach the display surface.
+    ///
+    /// Set from `Arsel.initialize` under `#if canImport(UIKit)` rather than constructed here:
+    /// `Core/` is Foundation-only by CI contract, so it cannot name a UIKit type. Until this is
+    /// set, in-app resolves triggers and then releases the slot without drawing.
+    func setInAppPresenter(_ present: @escaping (InAppMessage) -> Void) {
+        serial.async { self.inApp.present = present }
+    }
+
+    /// Hold in-app messages back, or let them through again.
+    func setInAppMessagingEnabled(_ enabled: Bool) {
+        serial.async { self.inApp.setSuppressed(!enabled) }
+    }
+
+    /// A reserved sync push asked us to refetch. Never renders.
+    func onInAppSyncRequested() {
+        serial.async { self.inApp.onSyncRequested() }
+    }
+
+    /// Called by the presenter once a message closes, so the next trigger can be taken.
+    func releaseInAppSlot() {
+        serial.async { self.inApp.releaseActive() }
+    }
+
+    func recordInAppImpression(_ message: InAppMessage, triggerEventName: String?) {
+        serial.async { self.inApp.recordImpression(message, triggerEventName: triggerEventName) }
+    }
+
+    func recordInAppClick(_ message: InAppMessage, buttonId: String) {
+        serial.async { self.inApp.recordClick(message, buttonId: buttonId) }
+    }
+
+    func recordInAppDismiss(_ message: InAppMessage, visibleSeconds: Int64) {
+        serial.async { self.inApp.recordDismiss(message, visibleSeconds: visibleSeconds) }
     }
 
     func onBackground() {

@@ -98,7 +98,9 @@ final class Drainer {
     /// across one would reorder the queue.
     private func nextGroup(_ live: [QueuedRequest], from index: Int) -> [QueuedRequest] {
         let head = live[index]
-        guard head.kind == .event || head.kind == .engagement else { return [head] }
+        guard head.kind == .event || head.kind == .engagement || head.kind == .inAppEvent else {
+            return [head]
+        }
         let cap = head.kind == .event ? Wire.eventBatchMax : Wire.engagementBatchMax
         var group = [head]
         var next = index + 1
@@ -154,6 +156,15 @@ final class Drainer {
                 // Nothing to authenticate with yet; only a registration mints one.
                 // Keep it queued, make sure a registration is on its way, and let
                 // the pass continue so that registration can actually be sent.
+                onNeedsRegistration?()
+                return .skip
+            }
+            headers[Wire.deviceAuthHeader] = secret
+            authenticated = true
+        case .inAppEvent:
+            path = Wire.inAppEventsPath(clientKey: context.clientKey)
+            payload = ["installationId": context.installationId, "events": items]
+            guard let secret = secrets.read() else {
                 onNeedsRegistration?()
                 return .skip
             }

@@ -30,6 +30,16 @@ final class MockTransport: Transport {
         if responses.count > 1 { return responses.removeFirst() }
         return responses.first ?? Self.ok()
     }
+
+    func get(url: URL, headers: [String: String], authenticated: Bool) -> TransportResponse {
+        requests.append(Recorded(url: url, body: [:], headers: headers, authenticated: authenticated))
+        if responses.count > 1 { return responses.removeFirst() }
+        return responses.first ?? Self.ok()
+    }
+
+    static func notModified() -> TransportResponse {
+        TransportResponse(result: .success, code: HTTP_NOT_MODIFIED, body: nil, retryAfterMs: nil)
+    }
 }
 
 final class InMemorySecretStore: SecretStore {
