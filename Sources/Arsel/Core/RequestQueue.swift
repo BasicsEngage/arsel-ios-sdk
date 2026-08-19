@@ -15,6 +15,10 @@ enum QueuedKind: String, Codable {
     case state
     /// `POST …/push/subscriptions/unsubscribe`, `X-Arsel-Device-Auth`.
     case unsubscribe
+    /// `POST …/in-app/events`, `X-Arsel-Device-Auth`. Batchable; body is ONE beacon —
+    /// the drain wraps consecutive runs into the `{installationId, events}` envelope,
+    /// exactly as it does for engagements.
+    case inAppEvent
 }
 
 /// A pending backend call, persisted until delivered.

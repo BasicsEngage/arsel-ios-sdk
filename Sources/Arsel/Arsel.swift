@@ -29,6 +29,7 @@ public enum Arsel {
         }
         let instance = ArselCore(config: config, directory: ArselCore.defaultDirectory())
         core = instance
+        attachInAppPresenter(instance)
         attachLifecycleObservers()
         refreshPermissionState()
         // Anything stranded by a previous run's death goes out now.
@@ -100,6 +101,29 @@ public enum Arsel {
 
     // MARK: Introspection
 
+    /// Record a screen view.
+    ///
+    /// One event, two consumers: it reaches segments and automations exactly as `track` does, and
+    /// it is the trigger source for screen-scoped in-app messages. Deliberately not a `track` call
+    /// with a convention name — the backend treats a screen view and a custom event of the same
+    /// name as different trigger types, and collapsing them here would fire screen-scoped messages
+    /// on every event that happened to share a name.
+    public static func screen(_ name: String, properties: [String: Any] = [:]) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var enriched = properties
+        enriched[InAppController.screenNameProperty] = trimmed
+        requireCore("screen")?.trackReserved(InAppController.screenViewEvent, properties: enriched)
+    }
+
+    /// Hold in-app messages back, or let them through again.
+    ///
+    /// For the moments a host knows are wrong — a checkout step, a video playing full screen. Not
+    /// persisted: it describes the current screen, not the device.
+    public static func setInAppMessagingEnabled(_ enabled: Bool) {
+        requireCore("setInAppMessagingEnabled")?.setInAppMessagingEnabled(enabled)
+    }
+
     /// The identity events carry before login. Rotated by `reset()`.
     /// Nil before `initialize()`.
     public static var anonymousId: String? {
@@ -127,3 +151,20 @@ public enum Arsel {
         return core
     }
 }
+
+#if canImport(UIKit)
+private var inAppPresenter: InAppPresenter?
+
+/// Attaches the UIKit display surface.
+///
+/// Held in a file-scope variable rather than on `Arsel` so the enum's public surface stays exactly
+/// what integrators see, and so `Core/` never names a UIKit type.
+private func attachInAppPresenter(_ core: ArselCore) {
+    let presenter = InAppPresenter(core: core)
+    inAppPresenter = presenter
+    core.setInAppPresenter { message in presenter.present(message) }
+}
+#else
+/// No display surface off-Apple-platforms; in-app resolves triggers and draws nothing.
+private func attachInAppPresenter(_ core: ArselCore) {}
+#endif

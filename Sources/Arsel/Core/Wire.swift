@@ -26,6 +26,14 @@ enum Wire {
         "/api/v1/orgs/\(clientKey)/push/engagements"
     }
 
+    static func inAppCataloguePath(clientKey: String, installationId: String) -> String {
+        "/api/v1/orgs/\(clientKey)/in-app/bundle?installationId=\(installationId)"
+    }
+
+    static func inAppEventsPath(clientKey: String) -> String {
+        "/api/v1/orgs/\(clientKey)/in-app/events"
+    }
+
     // MARK: Headers
 
     static let sdkHeader = "X-Arsel-SDK"
@@ -34,6 +42,7 @@ enum Wire {
     static let authorizationHeader = "Authorization"
     static let bearerPrefix = "Bearer "
     static let idempotencyKeyHeader = "Idempotency-Key"
+    static let ifNoneMatchHeader = "If-None-Match"
 
     // MARK: Limits
 
@@ -62,6 +71,9 @@ enum Wire {
         static let channelId = "arsel_channel_id"
         static let actions = "arsel_actions"
         static let collapseId = "arsel_collapse_id"
+
+        /// Reserved: refresh the in-app catalogue and render nothing at all.
+        static let inAppSync = "arsel_iam_sync"
     }
 
     /// Current `arsel_v`.

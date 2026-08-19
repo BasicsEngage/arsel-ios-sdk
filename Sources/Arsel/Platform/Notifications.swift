@@ -66,6 +66,23 @@ extension Arsel {
         ArselPushMessage.isArsel(userInfo: userInfo)
     }
 
+    /// Handle a silent Arsel push.
+    ///
+    /// Call from `application(_:didReceiveRemoteNotification:fetchCompletionHandler:)`. Returns
+    /// true when Arsel claimed it, so a host multiplexing several push sources knows to stop.
+    ///
+    /// The only silent payload today is the in-app sync ping, which carries no message id and no
+    /// title. It must never reach the notification path: that would book a `delivered` engagement
+    /// against a campaign message that was never sent, and there is no way to unpick that later.
+    @discardableResult
+    public static func handleSilentNotification(userInfo: [AnyHashable: Any]) -> Bool {
+        guard let flag = userInfo[Wire.DataKey.inAppSync] as? String, !flag.isEmpty else {
+            return false
+        }
+        Arsel.core?.onInAppSyncRequested()
+        return true
+    }
+
     /// Call from `userNotificationCenter(_:didReceive:withCompletionHandler:)`.
     ///
     /// Engagements exactly one engagement per tap — `opened` for the notification body,

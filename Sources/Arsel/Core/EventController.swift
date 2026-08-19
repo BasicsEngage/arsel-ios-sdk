@@ -10,6 +10,14 @@ final class EventController {
     private let log: ArselLog
     private let clock: () -> Int64
 
+    /// Notified after an event is durably queued.
+    ///
+    /// This is the only place that sees every event exactly once: downstream of the blank and
+    /// reserved-name rejects, downstream of the trim, and never on a retry — retries live entirely
+    /// in the drain re-reading the queue file. Set after init because the observer needs the core,
+    /// which needs this controller.
+    var onEvent: ((String, [String: Any], Int64) -> Void)?
+
     init(
         store: StateStore,
         enqueue: @escaping (QueuedRequest) -> Void,
@@ -65,5 +73,7 @@ final class EventController {
             body: json,
             dedupeKey: nil,
             createdAtMs: clock()))
+        // Last, so an observer never sees an event that failed to queue.
+        onEvent?(name, properties, timestampMs)
     }
 }
