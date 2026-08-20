@@ -26,8 +26,15 @@ for runtime in json.load(sys.stdin)["devices"].values():
 echo "device:  $DEVICE"
 echo "bundle:  $BUNDLE_ID"
 
-# The app must hold notification authorisation or the OS drops the push before the delegate runs.
-xcrun simctl privacy "$DEVICE" grant notifications "$BUNDLE_ID"
+# The app must hold notification authorisation or the OS drops the push before the delegate runs,
+# and the harness only requests it from a button tap. Granting it out-of-band writes the simulator's
+# TCC store, which GitHub's hosted runners refuse ("Failed to set access: Operation not permitted").
+# Exit 78 rather than 1 there: nothing was proven, but nothing is broken either, and the caller can
+# tell the two apart. Locally, on a Mac you own, this succeeds and the test runs for real.
+if ! xcrun simctl privacy "$DEVICE" grant notifications "$BUNDLE_ID"; then
+    echo "SKIP — cannot grant notification authorisation on this host; the push would be dropped undelivered." >&2
+    exit 78
+fi
 
 # --console streams the app's stdout, which is where the harness mirrors its SDK timeline.
 xcrun simctl launch --console "$DEVICE" "$BUNDLE_ID" >"$CONSOLE" 2>&1 &
