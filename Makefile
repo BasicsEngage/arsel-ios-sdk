@@ -37,6 +37,9 @@ build:
 
 ## Delivers a real push to the sample app on a booted simulator and asserts the SDK handled it.
 ## `simctl push` bypasses APNs, so this needs no signing key, no device and no Apple membership.
+# -derivedDataPath is resolved relative to the `cd` in the recipe, so it is `.build`
+# and not $(SAMPLE_DIR)/.build — the latter nests as Examples/Sample/Examples/Sample
+# and leaves the install step below looking at a path that was never written.
 push-smoke: require-simulator
 	cd $(SAMPLE_DIR) && xcodegen generate
 	cd $(SAMPLE_DIR) && xcodebuild build \
@@ -44,7 +47,7 @@ push-smoke: require-simulator
 		-scheme $(SAMPLE_SCHEME) \
 		-configuration Debug-Staging \
 		-destination "platform=iOS Simulator,id=$(SIM_ID)" \
-		-derivedDataPath $(SAMPLE_DIR)/.build \
+		-derivedDataPath .build \
 		CODE_SIGNING_ALLOWED=NO
 	xcrun simctl boot $(SIM_ID) 2>/dev/null || true
 	xcrun simctl install $(SIM_ID) \
