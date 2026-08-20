@@ -35,6 +35,22 @@ build:
 		-skipPackagePluginValidation \
 		CODE_SIGNING_ALLOWED=NO
 
+## Delivers a real push to the sample app on a booted simulator and asserts the SDK handled it.
+## `simctl push` bypasses APNs, so this needs no signing key, no device and no Apple membership.
+push-smoke: require-simulator
+	cd $(SAMPLE_DIR) && xcodegen generate
+	cd $(SAMPLE_DIR) && xcodebuild build \
+		-project $(SAMPLE_PROJ) \
+		-scheme $(SAMPLE_SCHEME) \
+		-configuration Debug-Staging \
+		-destination "platform=iOS Simulator,id=$(SIM_ID)" \
+		-derivedDataPath $(SAMPLE_DIR)/.build \
+		CODE_SIGNING_ALLOWED=NO
+	xcrun simctl boot $(SIM_ID) 2>/dev/null || true
+	xcrun simctl install $(SIM_ID) \
+		$(SAMPLE_DIR)/.build/Build/Products/Debug-Staging-iphonesimulator/ArselSample.app
+	Scripts/push-smoke.sh
+
 ## The harness app, built the way an integrator builds it.
 sample:
 	cd $(SAMPLE_DIR) && xcodegen generate
@@ -63,4 +79,4 @@ define udid_for
 $(shell xcrun simctl list devices available '$(1)' | grep -E '$(2)' | tail -1 | awk -F '[()]' '{ print $$(NF-3) }')
 endef
 
-.PHONY: default test build sample require-simulator
+.PHONY: default test build sample push-smoke require-simulator

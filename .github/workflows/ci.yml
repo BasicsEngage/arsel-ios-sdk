@@ -52,6 +52,20 @@ jobs:
       - name: Test
         run: make test
 
+  # The only automated run of the notification-centre delegate and the NSE against a real
+  # notification. `simctl push` injects the payload the way APNs would without reaching Apple,
+  # so this needs no signing key, no device and no Apple Developer membership.
+  push-smoke:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Push smoke test
+        run: make push-smoke
+
   # The integrator-facing surface: Examples/Sample resolves the SDK as a local
   # package, so this compiles what a customer actually links against.
   #
